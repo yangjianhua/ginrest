@@ -133,6 +133,41 @@ func (this *UserController) delete(ctx *gin.Context) {
 	}
 }
 
+func (this *BaseController) changePwd(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	password := ctx.PostForm("password")
+	if len(password) < 5 {
+		ctx.JSON(200, gin.H{"code": -1, "msg": "No vaild password provided"})
+		return
+	}
+	old_pwd := ctx.PostForm("oldpassword")
+
+	if password == old_pwd {
+		ctx.JSON(200, gin.H{"code": -1, "msg": "new password cannot be same with the old password"})
+		return
+	}
+
+	var u model.User
+	this.Context.DB.Where("id=?", id).First(&u)
+	if u.ID > 0 {
+		// Check old password if is correct
+		if !MatchBcrypt(old_pwd, u.Password) {
+			ctx.JSON(200, gin.H{"code": -1, "msg": "Old Password not match"})
+			return
+		}
+
+		u.Password = GetBcrypt(password)
+		if err := this.Context.DB.Save(&u); err.Error != nil {
+			ctx.JSON(200, gin.H{"code": -1, "msg": "Error:" + err.Error.Error()})
+		} else {
+			ctx.JSON(200, gin.H{"code": 0, "msg": "修改密码成功"})
+		}
+	} else {
+		ctx.JSON(200, gin.H{"code": -1, "msg": "User not found"})
+	}
+}
+
 func (this *UserController) InitRouter() {
 	this.Context = Ctx
 
@@ -141,5 +176,5 @@ func (this *UserController) InitRouter() {
 	this.AddToRouter(&Router{path: "/api/user/:id", method: "GET", auth: true}, this.get)
 	this.AddToRouter(&Router{path: "/api/user/:id", method: "PUT", auth: true}, this.update)
 	this.AddToRouter(&Router{path: "/api/user/:id", method: "DELETE", auth: true}, this.delete)
-	// this.AddToRouter(&Router{path: "/api/userlogin", method: "POST"}, this.login)
+	this.AddToRouter(&Router{path: "/api/user/changepwd/:id", method: "POST", auth: true}, this.changePwd)
 }

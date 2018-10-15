@@ -23,6 +23,7 @@ var Routers map[*Router]func(ctx *gin.Context)
 type BaseController struct {
 	// Session *model.Session
 	Context *Context
+	UserId  uint
 }
 
 var identityKey = "id"
@@ -72,6 +73,15 @@ func (this *BaseController) InitRouter() {
 	// This is a DB Migrate API
 	this.AddToRouter(&Router{path: "/api/migrate", method: "POST"}, this.doMigrate)
 	this.AddToRouter(&Router{path: "/api/login", method: "POST"}, authMiddleware.LoginHandler)
+}
+
+func (this *BaseController) getUserInfo(c *gin.Context) *model.User {
+	claims := jwt.ExtractClaims(c)
+	sId := claims[identityKey]
+	var u model.User
+	this.Context.DB.Where("id=?", sId).First(&u)
+
+	return &u
 }
 
 // Init JWT Login Sample From https://github.com/appleboy/gin-jwt
