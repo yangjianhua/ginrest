@@ -21,9 +21,7 @@ type Router struct {
 var Routers map[*Router]func(ctx *gin.Context)
 
 type BaseController struct {
-	// Session *model.Session
 	Context *Context
-	UserId  uint
 }
 
 var identityKey = "id"
