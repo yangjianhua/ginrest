@@ -1,9 +1,11 @@
 {
-  "ServerPort": 8080,
+  "ServerPort": 8000,
   "DbPort": 3306,
   "DbHost": "127.0.0.1",
   "DbName": "ginrest",
   "DbUser": "root",
   "DbPassword": "root1234",
-  "DbUrl": ""
+  "DbUrl": "",
+  "DbPrefix": "ak1_",
+  "Debug": true
 }

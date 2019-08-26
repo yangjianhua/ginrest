@@ -7,8 +7,10 @@ import (
 
 	jwt "github.com/appleboy/gin-jwt"
 	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"github.com/yangjianhua/ginrest/model"
+	"gopkg.in/gormigrate.v1"
 )
 
 type Router struct {
@@ -16,9 +18,11 @@ type Router struct {
 	regex  string
 	path   string
 	auth   bool
+	group  int
 }
 
 var Routers map[*Router]func(ctx *gin.Context)
+var apiRootPath = "/api"
 
 type BaseController struct {
 	Context *Context
@@ -51,11 +55,64 @@ func (this *BaseController) AddToRouter(r *Router, f gin.HandlerFunc) {
 }
 
 func (this *BaseController) doMigrate(ctx *gin.Context) {
-	this.Context.DB.AutoMigrate(model.User{},
-		model.Session{},
-		model.Test{})
+	opt := &gormigrate.Options{
+		TableName:      CONFIG.DbPrefix + "migrations",
+		IDColumnName:   "id",
+		IDColumnSize:   255,
+		UseTransaction: true,
+	}
 
-	ctx.JSON(200, gin.H{"code": 0, "msg": "Database Migrate OK."})
+	m := gormigrate.New(this.Context.DB, opt, []*gormigrate.Migration{
+		{
+			ID: "201810291200",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(model.User{}).Error; err != nil {
+					return err
+				}
+				if err := tx.AutoMigrate(model.Group{}).Error; err != nil {
+					return err
+				}
+				if err := tx.AutoMigrate(model.GroupUser{}).Error; err != nil {
+					return err
+				}
+
+				// Init User.admin
+				var u = model.User{
+					Name:     "admin",
+					Email:    "admin@admin.com",
+					Password: GetBcrypt("admin123456"),
+					IsAdmin:  true,
+				}
+				tx.Save(&u)
+
+				// Add foreign keys
+				tx.Model(model.GroupUser{}).AddForeignKey("user_id", CONFIG.DbPrefix+"users(id)", "CASCADE", "CASCADE")
+				tx.Model(model.GroupUser{}).AddForeignKey("group_id", CONFIG.DbPrefix+"groups(id)", "CASCADE", "CASCADE")
+
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return nil
+			},
+		},
+	})
+
+	if err := m.Migrate(); err != nil {
+		ctx.JSON(200, gin.H{"code": -1, "msg": err.Error()})
+	} else {
+		ctx.JSON(200, gin.H{"code": 0, "msg": "DB Migreate OK."})
+	}
+
+}
+
+func (this *BaseController) doCleanDb(ctx *gin.Context) {
+	this.Context.DB.DropTableIfExists(&model.Test{}, &model.GroupUser{})
+
+	this.Context.DB.DropTableIfExists(&model.User{}, &model.Group{})
+
+	this.Context.DB.DropTableIfExists(CONFIG.DbPrefix + "migrations")
+
+	ctx.JSON(200, gin.H{"code": 0, "msg": "database clean OK."})
 }
 
 func (this *BaseController) InitRouter() {
@@ -63,14 +120,21 @@ func (this *BaseController) InitRouter() {
 	this.Context = Ctx
 
 	// This is a Test Router just test for running.
-	// this.AddToRouter(&Router{path: "welcome", method: "GET"}, welcome)
+	this.AddToRouter(&Router{path: "/api/welcome", method: "GET"}, welcome)
 
 	// Init Json Web Token Login Object.
 	this.jwtLogin()
 
 	// This is a DB Migrate API
-	this.AddToRouter(&Router{path: "/api/migrate", method: "POST"}, this.doMigrate)
+	// The DB Migrate and Clean API should be disabled on product
+	if CONFIG.Debug {
+		this.AddToRouter(&Router{path: "/api/migrate", method: "POST"}, this.doMigrate)
+		this.AddToRouter(&Router{path: "/api/cleandb", method: "POST", auth: true}, this.doCleanDb)
+	}
 	this.AddToRouter(&Router{path: "/api/login", method: "POST"}, authMiddleware.LoginHandler)
+	this.AddToRouter(&Router{path: "/api/logout", method: "POST", auth: true}, this.logout)
+	this.AddToRouter(&Router{path: "/api/userinfo", method: "GET", auth: true}, this.userInfo)
+	this.AddToRouter(&Router{path: "/api/get_info", method: "GET", auth: true}, this.userInfo)
 }
 
 func (this *BaseController) getUserInfo(c *gin.Context) *model.User {
@@ -82,9 +146,20 @@ func (this *BaseController) getUserInfo(c *gin.Context) *model.User {
 	return &u
 }
 
+func (this *BaseController) userInfo(c *gin.Context) {
+	claims := jwt.ExtractClaims(c)
+	id := claims[identityKey]
+	var u model.User
+	this.Context.DB.Where("id=?", id).First(&u)
+
+	c.JSON(200, gin.H{"code": 0, "data": u})
+}
+
 // Init JWT Login Sample From https://github.com/appleboy/gin-jwt
 func (this *BaseController) jwtLogin() {
 	var err error
+	var u_loc model.User // Save user for LoginResponse
+
 	authMiddleware, err = jwt.New(&jwt.GinJWTMiddleware{
 		Realm:       "test zone",
 		Key:         []byte("secret key"),
@@ -104,7 +179,7 @@ func (this *BaseController) jwtLogin() {
 		IdentityHandler: func(c *gin.Context) interface{} {
 			claims := jwt.ExtractClaims(c)
 			var u model.User
-			id := claims["name"]
+			id := claims[identityKey]
 			this.Context.DB.Where("id=?", id).First(&u)
 			return &u
 		},
@@ -113,23 +188,38 @@ func (this *BaseController) jwtLogin() {
 			if err := c.ShouldBind(&loginVars); err != nil {
 				return "", jwt.ErrMissingLoginValues
 			}
-			userID := loginVars.Username
+			username := loginVars.Username
 			password := loginVars.Password
 
 			var u model.User
-			this.Context.DB.Where("name=?", userID).First(&u)
+			this.Context.DB.Where("name=?", username).First(&u)
 			if MatchBcrypt(password, u.Password) {
+				u_loc = u
 				return &u, nil
 			}
 
 			return nil, jwt.ErrFailedAuthentication
 		},
 		Authorizator: func(data interface{}, c *gin.Context) bool {
-			if _, ok := data.(*model.User); ok == true {
+			if u, ok := data.(*model.User); ok && u.ID > 0 {
+				if model.Uid != u.ID { // Set model.Uid Here, it's OK?
+					model.Uid = u.ID
+				}
 				return true
 			}
 
 			return false
+		},
+		LoginResponse: func(c *gin.Context, code int, token string, expire time.Time) {
+			c.JSON(code, gin.H{
+				"statusText": "OK",
+				"token":      "Bearer " + token,
+				"expire":     expire,
+				"id":         u_loc.ID,
+				"name":       u_loc.Name,
+				"avator":     u_loc.Avator,
+				"access":     "admin",
+			})
 		},
 		Unauthorized: func(c *gin.Context, code int, message string) {
 			c.JSON(code, gin.H{
@@ -146,11 +236,18 @@ func (this *BaseController) jwtLogin() {
 	}
 }
 
+// Add logout code later.
+func (this *BaseController) logout(ctx *gin.Context) {
+	ctx.JSON(200, gin.H{"code": 0, "msg": "Do nothing to logout."})
+}
+
 func (this *BaseController) InitializeRouter(r *gin.Engine) {
 	// All Controller's Router Register Here First.
 	new(BaseController).InitRouter()
 	new(TestController).InitRouter()
 	new(UserController).InitRouter()
+	new(GroupController).InitRouter()
+	new(GroupUserController).InitRouter()
 
 	r.NoRoute(authMiddleware.MiddlewareFunc(), func(c *gin.Context) {
 		// claims := jwt.ExtractClaims(c)
@@ -158,9 +255,9 @@ func (this *BaseController) InitializeRouter(r *gin.Engine) {
 		c.JSON(404, gin.H{"code": "PAGE_NOT_FOUND", "msg": "Page not found"})
 	})
 
-	apiPrefix := "/api"
+	apiPrefix := apiRootPath
 	auth := r.Group(apiPrefix)
-	auth.GET(apiPrefix+"/refresh_token", authMiddleware.RefreshHandler)
+	auth.GET("/refresh_token", authMiddleware.RefreshHandler)
 
 	// auth.Use(authMiddleware.MiddlewareFunc()).GET("/hello", welcome)
 
@@ -173,6 +270,14 @@ func (this *BaseController) InitializeRouter(r *gin.Engine) {
 				path = strings.Replace(k.path, apiPrefix, "", 1) // So the controller can just write "/api/path", don't need to check auth
 			}
 		}
+
+		// Add Router Right Here?
+		// if k.group > 0 {
+		// 	r.NoRoute(func(c *gin.Context) {
+		// 		c.JSON(200, gin.H{"code": -1, "msg": "Not Allowed."})
+		// 	})
+		// 	continue
+		// }
 
 		switch k.method {
 		case "GET":

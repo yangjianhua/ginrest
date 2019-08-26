@@ -33,7 +33,7 @@ func (this *UserController) getPage(ctx *gin.Context) {
 	mobile := ctx.Query("mobile")
 	tel := ctx.Query("tel")
 
-	p_no := ctx.DefaultQuery("pageno", "1")
+	p_no := ctx.DefaultQuery("page", "1")
 	p_count := ctx.DefaultQuery("pagecount", "10")
 
 	pageno, _ := strconv.Atoi(p_no)
@@ -74,7 +74,7 @@ func (this *UserController) create(ctx *gin.Context) {
 			ctx.JSON(200, gin.H{"code": -1, "msg": err.Error.Error()})
 			return
 		} else {
-			ctx.JSON(200, gin.H{"code": 0, "msg": "create OK"})
+			ctx.JSON(200, gin.H{"code": 0, "data": u.ID, "msg": "create OK"})
 			return
 		}
 	} else {
@@ -126,6 +126,11 @@ func (this *UserController) delete(ctx *gin.Context) {
 
 	var u model.User
 	this.Context.DB.Where("id=?", id).First(&u)
+	if u.ID == model.Uid {
+		ctx.JSON(200, gin.H{"code": -1, "msg": "Cannot delete self."})
+		return
+	}
+
 	if err := this.Context.DB.Delete(&u); err.Error != nil {
 		ctx.JSON(200, gin.H{"code": -1, "msg": "Error:" + err.Error.Error()})
 	} else {
@@ -207,12 +212,13 @@ func (this *BaseController) toggleAdmin(ctx *gin.Context) {
 func (this *UserController) InitRouter() {
 	this.Context = Ctx
 
-	this.AddToRouter(&Router{path: "/api/user", method: "GET", auth: true}, this.getPage)
-	this.AddToRouter(&Router{path: "/api/user", method: "POST", auth: true}, this.create)
-	this.AddToRouter(&Router{path: "/api/user/:id", method: "GET", auth: true}, this.get)
-	this.AddToRouter(&Router{path: "/api/user/:id", method: "PUT", auth: true}, this.update)
-	this.AddToRouter(&Router{path: "/api/user/:id", method: "DELETE", auth: true}, this.delete)
+	path := apiRootPath + "/user"
+	this.AddToRouter(&Router{path: path, method: "GET", auth: true}, this.getPage)
+	this.AddToRouter(&Router{path: path, method: "POST", auth: true}, this.create)
+	this.AddToRouter(&Router{path: path + "/:id", method: "GET", auth: true}, this.get)
+	this.AddToRouter(&Router{path: path + "/:id", method: "PUT", auth: true}, this.update)
+	this.AddToRouter(&Router{path: path + "/:id", method: "DELETE", auth: true}, this.delete)
 
-	this.AddToRouter(&Router{path: "/api/user/changepwd/:id", method: "POST", auth: true}, this.changePwd)
-	this.AddToRouter(&Router{path: "/api/user/changeadm/:id", method: "POST", auth: true}, this.toggleAdmin)
+	this.AddToRouter(&Router{path: path + "/changepwd/:id", method: "POST", auth: true}, this.changePwd)
+	this.AddToRouter(&Router{path: path + "/changeadm/:id", method: "POST", auth: true}, this.toggleAdmin)
 }

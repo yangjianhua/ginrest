@@ -28,6 +28,10 @@ func (this *Context) OpenDb() {
 		str := fmt.Sprintf("Connect to Database Error, please check your config, %s", err.Error())
 		panic(str)
 	}
+	// Set Tablename's prefix
+	gorm.DefaultTableNameHandler = func(db *gorm.DB, defaultTableName string) string {
+		return CONFIG.DbPrefix + defaultTableName
+	}
 
 	// 赋值给model的全局变量，从而使model可以访问数据库
 	// 不需要赋值，在model中可以使用 scope *gorm.Scope 获取当前的数据库访问链接

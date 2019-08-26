@@ -1,13 +1,6 @@
 package main
 
 import (
-
-	// "io"
-	// "fmt"
-	// "reflect"
-	// "os"
-	// "time"
-
 	"log"
 	"strconv"
 
@@ -16,31 +9,34 @@ import (
 	"github.com/yangjianhua/ginrest/controller"
 )
 
-// type dbContext struct {
-// 	DB *gorm.DB
-// }
-
-func ping(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"message": "pong",
-	})
+// 解决本地开发跨域问题
+// 可以将 Access-Control-Allow-Origin 设置为CONFIG选项，以便保护服务器安全
+func allowCors() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	}
 }
-
-// func (this *dbContext) connectDB() {
-// 	cnn := "root:root1234@tcp(127.0.0.1:3306)/ginrest?charset=utf8&parseTime=True&loc=Local"
-// 	var err error = nil
-// 	this.DB, err = gorm.Open("mysql", cnn)
-// 	if err != nil {
-// 		panic(err.Error())
-// 	}
-// }
 
 func main() {
 	context := controller.Context{}
 	context.Init()
 	defer context.Destory()
 
+	if controller.CONFIG.Debug {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r := gin.Default()
+	r.Use(allowCors())
 	port := ":8080"
 	if controller.CONFIG.ServerPort > 0 {
 		port = ":" + strconv.Itoa(controller.CONFIG.ServerPort)

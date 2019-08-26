@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 const (
@@ -21,6 +22,8 @@ var CONFIG = &Config{
 	DbUser:     "",
 	DbPassword: "",
 	DbUrl:      "",
+	Debug:      false,
+	DbPrefix:   "",
 }
 
 type Config struct {
@@ -31,6 +34,8 @@ type Config struct {
 	DbUser     string
 	DbPassword string
 	DbUrl      string
+	Debug      bool
+	DbPrefix   string
 }
 
 func (this *Config) validate() string {
@@ -53,6 +58,16 @@ func (this *Config) validate() string {
 	}
 	if this.DbPassword == "" {
 		strRet = "Database Password Must Config"
+	}
+
+	if this.DbPrefix != "" {
+		b, _ := regexp.MatchString("[A-Za-z0-9_-]", this.DbPrefix)
+		if !b {
+			panic("Config Error: DbPrefix Not Valid String, only a-z,A-Z,_-")
+		}
+		if len(this.DbPrefix) > 10 {
+			panic("Config Error: Dbprefix max 10 chars")
+		}
 	}
 
 	return strRet
